@@ -239,5 +239,4 @@ python -m unittest -v tests
 ```
 
 ## License
-
-MIT — use this however you want.
+use this however you want.
