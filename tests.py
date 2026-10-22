@@ -18,16 +18,26 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(len(items), 20)
         self.assertTrue(all(len(item["embedding"]) == DIMS for item in items))
 
-    def test_search(self):
+    def test_search_algorithms(self):
         query = ",".join(map(str, db.items[1]["embedding"]))
-        response = self.client.get("/search?v=" + query + "&k=3&metric=cosine&algo=bruteforce")
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        self.assertEqual(len(data["results"]), 3)
-        self.assertEqual(data["results"][0]["id"], 1)
+        for algo in ("bruteforce", "kdtree", "hnsw"):
+            response = self.client.get(
+                "/search?v=" + query + "&k=3&metric=cosine&algo=" + algo
+            )
+            self.assertEqual(response.status_code, 200)
+            results = response.get_json()["results"]
+            self.assertEqual(len(results), 3)
+            self.assertEqual(results[0]["id"], 1)
 
     def test_invalid_vector(self):
         self.assertEqual(self.client.get("/search?v=1,2").status_code, 400)
+
+    def test_hnsw_info(self):
+        response = self.client.get("/hnsw-info")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["nodeCount"], 20)
+        self.assertTrue(data["nodesPerLayer"])
 
     def test_distance_metrics(self):
         self.assertAlmostEqual(distance([1, 0], [1, 0], "cosine"), 0)
