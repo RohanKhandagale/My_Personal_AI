@@ -133,13 +133,23 @@ class VectorDB:
 
 
 class DocumentDB:
-    def __init__(self):self.docs={};self.next_id=1;self.dims=0
+    """Document chunks indexed by a separate HNSW graph (supports 768D embeddings)."""
+    def __init__(self):
+        self.docs={};self.next_id=1;self.dims=0;self.hnsw=HNSW(m=16)
     def insert(self,title,text,embedding):
         idx=self.next_id;self.next_id+=1;self.dims=len(embedding)
-        self.docs[idx]={"id":idx,"title":title,"text":text,"embedding":embedding};return idx
-    def remove(self,idx):return self.docs.pop(idx,None) is not None
+        item={"id":idx,"title":title,"text":text,"embedding":[float(x) for x in embedding]}
+        self.docs[idx]=item
+        self.hnsw.insert(item)
+        return idx
+    def remove(self,idx):
+        if idx not in self.docs:return False
+        self.docs.pop(idx,None);self.hnsw.remove(idx)
+        return True
     def search(self,q,k):
-        return sorted(((distance(q,d["embedding"]),d) for d in self.docs.values() if len(q)==len(d["embedding"])),key=lambda x:x[0])[:k]
+        if not self.docs or len(q)!=self.dims:return []
+        pairs=self.hnsw.search(q,k,"cosine")
+        return [(dist,self.docs[idx]) for dist,idx in pairs if idx in self.docs]
 
 
 db=VectorDB();docdb=DocumentDB()
@@ -157,10 +167,17 @@ def ollama_available():
     except Exception:return False
 
 def embed(text):
-    result=ollama_post("/api/embeddings",{"model":EMBED_MODEL,"prompt":text})
-    if result and result.get("embedding"):return result["embedding"]
+    """Create an embedding with the current Ollama API, with legacy fallback."""
     result=ollama_post("/api/embed",{"model":EMBED_MODEL,"input":text})
-    return result.get("embeddings",[[]])[0] if result else []
+    if result:
+        vectors=result.get("embeddings")
+        if isinstance(vectors,list) and vectors and isinstance(vectors[0],list):
+            return vectors[0]
+        # Be tolerant of compatible Ollama versions returning a singular vector.
+        if isinstance(result.get("embedding"),list):
+            return result["embedding"]
+    result=ollama_post("/api/embeddings",{"model":EMBED_MODEL,"prompt":text})
+    return result.get("embedding",[]) if result else []
 
 def generate(prompt):
     result=ollama_post("/api/generate",{"model":GEN_MODEL,"prompt":prompt,"stream":False})
@@ -231,10 +248,20 @@ def stats():return jsonify(count=len(db.items),dims=DIMS,algorithms=["bruteforce
 def doc_insert():
     data=request.get_json(silent=True) or {};title=str(data.get("title","")).strip();text=str(data.get("text","")).strip()
     if not title or not text:return jsonify(error="need title and text"),400
-    chunks=chunk_text(text);ids=[]
-    for i,chunk in enumerate(chunks):
+    chunks=chunk_text(text)
+    if not chunks:return jsonify(error="document text is empty"),400
+    # Embed every chunk before mutating the store. A model/network failure must
+    # not leave a partially inserted document behind.
+    vectors=[]
+    for chunk in chunks:
         vector=embed(chunk)
-        if not vector:return jsonify(error="Ollama unavailable. Install Ollama, then pull nomic-embed-text and llama3.2."),503
+        if not vector:
+            return jsonify(error="Ollama embedding failed. Start Ollama and run: ollama pull nomic-embed-text"),503
+        if vectors and len(vector)!=len(vectors[0]):
+            return jsonify(error="Ollama returned inconsistent embedding dimensions"),502
+        vectors.append(vector)
+    ids=[]
+    for i,(chunk,vector) in enumerate(zip(chunks,vectors)):
         label=f"{title} [{i+1}/{len(chunks)}]" if len(chunks)>1 else title
         ids.append(docdb.insert(label,chunk,vector))
     return jsonify(ids=ids,chunks=len(chunks),dims=docdb.dims)

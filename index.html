@@ -30,10 +30,57 @@ async function deleteVector(id){await fetch('/delete/'+id,{method:'DELETE'});awa
 async function insertDocument(){docStatus.textContent='Embedding document with Ollama…';try{let d=await api('/doc/insert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:docTitle.value,text:docText.value})});docStatus.textContent='Inserted '+d.chunks+' chunk(s), '+d.dims+'D embeddings';docTitle.value='';docText.value='';await loadDocs();await status()}catch(e){docStatus.textContent=e.message+' — check that Ollama and nomic-embed-text are installed.'}}
 async function loadDocs(){try{let docs=await api('/doc/list');documents.innerHTML=docs.length?docs.map(d=>'<div class="result"><strong>'+esc(d.title)+'</strong><div class="muted">'+esc(d.preview)+'</div><span class="muted">'+d.words+' words</span> <button class="secondary" onclick="deleteDoc('+d.id+')">Delete</button></div>').join(''):'<div class="muted">No documents stored yet.</div>'}catch(e){}}
 async function deleteDoc(id){await fetch('/doc/delete/'+id,{method:'DELETE'});loadDocs();status()}
-async function askAI(){answer.textContent='Retrieving relevant chunks and asking Ollama…';try{let d=await api('/doc/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:question.value,k:Number(ragK.value)})});answer.textContent=d.answer+'\n\nRetrieved context:\n'+d.contexts.map((c,i)=>(i+1)+'. '+c.title+' (distance '+c.distance+')\n'+c.text).join('\n\n')}catch(e){answer.textContent=e.message+' — make sure Ollama is running and documents are embedded.'}}
+async function askAI(){answer.textContent='Retrieving relevant chunks and asking Ollama…';try{let d=await api('/doc/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:question.value,k:Number(ragK.value)})});answer.textContent=d.answer+'\n\nRetrieved context:\n'+(d.contexts||[]).map((c,i)=>(i+1)+'. '+c.title+' (distance '+c.distance+')\n'+(c.text||'')).join('\n\n')}catch(e){answer.textContent=e.message+' — make sure Ollama is running and documents are embedded.'}}
 async function status(){try{let d=await api('/status');serverStatus.textContent='Python API online · '+d.demoCount+' vectors';ollamaStatus.textContent='Ollama: '+(d.ollamaAvailable?'ONLINE':'OFFLINE')+' · embedding: '+d.embedModel+' · generation: '+d.genModel+' · documents: '+d.docCount;stats.textContent='Demo vectors: '+d.demoCount+' · dimensions: '+d.demoDims+' · stored document chunks: '+d.docCount+' · document dimensions: '+d.docDims}catch(e){serverStatus.textContent='API unavailable'}}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function draw(){const c=document.getElementById('plot'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);const colors={cs:'#00d9ff',math:'#b388ff',food:'#ffb74d',sports:'#69f0ae',doc:'#f38ba8'};allItems.forEach(x=>{let e=x.embedding;let a=e.slice(0,4).reduce((s,n)=>s+n,0),b=e.slice(4,8).reduce((s,n)=>s+n,0),d=e.slice(8,12).reduce((s,n)=>s+n,0),f=e.slice(12).reduce((s,n)=>s+n,0);let sum=a+b+d+f||1;let px=30+(a+d)/sum*(c.width-60),py=25+(b+f)/sum*(c.height-50);ctx.beginPath();ctx.arc(px,py,6,0,Math.PI*2);ctx.fillStyle=colors[x.category]||'#aaa';ctx.fill();});plotLegend.textContent=allItems.length+' vectors plotted · categories: CS, Math, Food, Sports'}
+function pca2D(embeddings){
+  const n=embeddings.length;
+  if(!n)return [];
+  const d=embeddings[0].length;
+  if(n===1)return [[0,0]];
+  const mean=Array(d).fill(0);
+  for(const e of embeddings)for(let j=0;j<d;j++)mean[j]+=e[j]/n;
+  const X=embeddings.map(e=>e.map((v,j)=>v-mean[j]));
+  function normalize(v){
+    const norm=Math.sqrt(v.reduce((s,x)=>s+x*x,0));
+    return norm<1e-12?null:v.map(x=>x/norm);
+  }
+  function component(seed,previous){
+    let v=Array.from({length:d},(_,i)=>Math.cos((i+1)*(seed===1?0.731:1.137))+Math.sin((i+2)*(seed===1?0.317:0.419)));
+    if(previous){const dot=v.reduce((s,x,i)=>s+x*previous[i],0);v=v.map((x,i)=>x-dot*previous[i]);}
+    v=normalize(v)||Array.from({length:d},(_,i)=>i===seed?1:0);
+    for(let iter=0;iter<120;iter++){
+      const xv=X.map(row=>row.reduce((s,x,j)=>s+x*v[j],0));
+      const next=Array(d).fill(0);
+      for(let i=0;i<n;i++)for(let j=0;j<d;j++)next[j]+=X[i][j]*xv[i];
+      if(previous){const dot=next.reduce((s,x,i)=>s+x*previous[i],0);for(let j=0;j<d;j++)next[j]-=dot*previous[j];}
+      const nv=normalize(next);if(!nv)break;
+      const alignment=Math.abs(nv.reduce((s,x,i)=>s+x*v[i],0));
+      v=nv;if(alignment>0.999999)break;
+    }
+    return v;
+  }
+  const pc1=component(1,null),pc2=component(2,pc1);
+  return X.map(row=>[row.reduce((s,x,i)=>s+x*pc1[i],0),row.reduce((s,x,i)=>s+x*pc2[i],0)]);
+}
+function draw(){
+  const c=document.getElementById('plot'),ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  const colors={cs:'#00d9ff',math:'#b388ff',food:'#ffb74d',sports:'#69f0ae',doc:'#f38ba8'};
+  if(!allItems.length){plotLegend.textContent='No vectors to plot';return;}
+  const coords=pca2D(allItems.map(x=>x.embedding));
+  const xs=coords.map(p=>p[0]),ys=coords.map(p=>p[1]);
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const spanX=maxX-minX||1,spanY=maxY-minY||1;
+  allItems.forEach((item,i)=>{
+    const px=24+(coords[i][0]-minX)/spanX*(c.width-48);
+    const py=c.height-24-(coords[i][1]-minY)/spanY*(c.height-48);
+    ctx.beginPath();ctx.arc(px,py,6,0,Math.PI*2);
+    ctx.fillStyle=colors[item.category]||'#aaa';ctx.fill();
+    ctx.strokeStyle='#090914';ctx.lineWidth=1.5;ctx.stroke();
+  });
+  plotLegend.textContent=allItems.length+' vectors · 2D PCA projection · CS, Math, Food, Sports';
+}
 async function loadItems(){try{allItems=await api('/items');draw();await status()}catch(e){}}
 loadItems().then(()=>{runSearch();loadDocs();status()});
 </script></body></html>

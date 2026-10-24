@@ -13,7 +13,7 @@ A fully working educational **Vector Database** implemented in Python with a web
 | **3 Search Algorithms** | HNSW, KD-Tree, and Brute Force search |
 | **3 Distance Metrics** | Cosine similarity, Euclidean distance, Manhattan distance |
 | **16D Demo Vectors** | 20 pre-loaded semantic vectors across CS, Math, Food, and Sports |
-| **Semantic-Space Plot** | Visual view of demo vectors grouped by category |
+| **2D PCA Scatter Plot** | Principal-component projection of the demo vectors, colored by semantic category |
 | **Real Document Embedding** | Paste text and use Ollama's `nomic-embed-text` model |
 | **RAG Pipeline** | Retrieve relevant document chunks and generate an answer with a local LLM |
 | **REST API** | Insert, delete, search, benchmark, HNSW information, document search, and status endpoints |
@@ -123,7 +123,7 @@ python app.py
 
 Open your browser at http://localhost:8080.
 
-The original 20 demo vectors load automatically. Demo search and benchmarking can be used without Ollama; document embedding and RAG require Ollama and the models listed above.
+The original 20 demo vectors load automatically. Demo search, PCA visualization, and benchmarking can be used without Ollama; document embedding and RAG require Ollama and the models listed above. The web UI stays on `http://localhost:8080` and the Python server is started with `python app.py`.
 
 ---
 
@@ -152,7 +152,7 @@ The original 20 demo vectors load automatically. Demo search and benchmarking ca
 3. Click **Ask AI**.
 4. The application embeds the question, retrieves similar document chunks, and sends them as context to `llama3.2`.
 
-The document store is held in memory in this learning version; documents are cleared when the Python server restarts.
+Document chunks and their HNSW index are held in memory in this learning version; they are cleared when the Python server restarts. The document retrieval index is separate from the 16D demo-vector index and accepts Ollama's 768D `nomic-embed-text` embeddings.
 
 ---
 
@@ -213,7 +213,8 @@ My_personal_AI/
 
 - **Brute Force:** compares the query against every stored vector; a simple baseline.
 - **KD-Tree:** a space-partitioning approach that is most useful for lower-dimensional data.
-- **HNSW:** a layered neighbor graph designed for approximate nearest-neighbor search.
+- **HNSW:** a layered neighbor graph designed for approximate nearest-neighbor search. The Python implementation is educational and is not a production-optimized HNSW library.
+- **Document RAG index:** a separate HNSW graph indexes real Ollama document embeddings; the 16D demo index and 768D document index are kept separate.
 - **Cosine distance:** compares vector direction.
 - **Euclidean distance:** measures straight-line distance.
 - **Manhattan distance:** sums absolute coordinate differences.

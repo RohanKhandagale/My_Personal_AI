@@ -1,5 +1,5 @@
 import unittest
-from app import app, distance, chunk_text, DIMS, db
+from app import app, distance, chunk_text, DIMS, db, DocumentDB
 
 
 class ProjectTests(unittest.TestCase):
@@ -43,6 +43,14 @@ class ProjectTests(unittest.TestCase):
         self.assertAlmostEqual(distance([1, 0], [1, 0], "cosine"), 0)
         self.assertAlmostEqual(distance([0, 0], [1, 1], "euclidean"), 2 ** 0.5)
         self.assertAlmostEqual(distance([1, 2], [3, 4], "manhattan"), 4)
+
+    def test_document_embeddings_use_hnsw_retrieval(self):
+        docs = DocumentDB()
+        docs.insert("close match", "nearest document", [1.0, 0.0, 0.0])
+        docs.insert("far match", "different document", [0.0, 1.0, 0.0])
+        hits = docs.search([1.0, 0.0, 0.0], 1)
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0][1]["title"], "close match")
 
     def test_chunk_text(self):
         self.assertEqual(chunk_text("one two three"), ["one two three"])
