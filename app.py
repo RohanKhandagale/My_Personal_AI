@@ -133,13 +133,23 @@ class VectorDB:
 
 
 class DocumentDB:
-    def __init__(self):self.docs={};self.next_id=1;self.dims=0
+    """Document chunks indexed by a separate HNSW graph (supports 768D embeddings)."""
+    def __init__(self):
+        self.docs={};self.next_id=1;self.dims=0;self.hnsw=HNSW(m=16)
     def insert(self,title,text,embedding):
         idx=self.next_id;self.next_id+=1;self.dims=len(embedding)
-        self.docs[idx]={"id":idx,"title":title,"text":text,"embedding":embedding};return idx
-    def remove(self,idx):return self.docs.pop(idx,None) is not None
+        item={"id":idx,"title":title,"text":text,"embedding":[float(x) for x in embedding]}
+        self.docs[idx]=item
+        self.hnsw.insert(item)
+        return idx
+    def remove(self,idx):
+        if idx not in self.docs:return False
+        self.docs.pop(idx,None);self.hnsw.remove(idx)
+        return True
     def search(self,q,k):
-        return sorted(((distance(q,d["embedding"]),d) for d in self.docs.values() if len(q)==len(d["embedding"])),key=lambda x:x[0])[:k]
+        if not self.docs or len(q)!=self.dims:return []
+        pairs=self.hnsw.search(q,k,"cosine")
+        return [(dist,self.docs[idx]) for dist,idx in pairs if idx in self.docs]
 
 
 db=VectorDB();docdb=DocumentDB()
