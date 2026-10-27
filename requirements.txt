@@ -1,1 +1,2 @@
-Flask>=3.0,<4.0
+# VectorDB uses only the Python standard library (Python 3.10+).
+# No third-party packages are required.
